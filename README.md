@@ -1,2 +1,2 @@
 # SimpleProxyServer
-Proxy server using Python socket project
+A simple proxy server using Python socket.
