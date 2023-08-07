@@ -3,51 +3,76 @@ from socket import *
 
 import sys
 
-def handleGET(message):
-    path = message.decode().split()[1]
+def handleWebServer(webServer, msgSend):
+    s = socket(AF_INET, SOCK_STREAM)
+    s.connect((webServer, 80))
+    # Send request to web server
+    s.send(msgSend)
+    print(f"[*->] Sending request to web server: \n{msgSend.decode()}\r\n")
 
+    # Receive reply from web server
+    msg = b""
+    while True:
+        chunk = s.recv(1024)
+        if len(chunk) <= 0: 
+            break
+        msg += chunk
+    try:
+        print(f"[*<-] Received web server response: \n{msg.decode()}\r\n")
+    except:
+        print(f"[*<-] Received web server response: \n{msg.decode('latin1')}\r\n")
+    
+    return msg
+
+def handleGET(message):
+    # Get web server and file path from message
+    method = message.decode().split()[0]
+    path = message.decode().split()[1]
     http_pos = path.find("://")
     if (http_pos != -1):
         path = path.partition("://")[2]
-    print(path)
     webServer, trash, file = path.partition("/")
     file = "/" + file
 
-    s = socket(AF_INET, SOCK_STREAM)
-    s.settimeout(5)
-    try:
-        s.connect((webServer, 80))
+    # Create message to be sent to web server
+    requestLine = f"{method} {file} HTTP/1.1\r\n"
+    msgSend = requestLine 
+    msgSend += message.decode().partition("\r\n")[2].partition("\r\n\r\n")[0]
+    msgSend += "\r\nConnection: close\r\n\r\n"
 
-        # Create request to web server
-        requestLine = f"GET /{file} HTTP/1.1\r\n"
-        msgSend = requestLine 
-        msgSend += message.decode().partition("\r\n")[2].partition("\r\n\r\n")[0]
-        msgSend += "\r\nConnection: close\r\n\r\n"
-        # Send request to web server
-        s.send(msgSend.encode())
-        print(f"[*->] Sending request to web server: \n{msgSend}")
+    # Connect to web server and get reply
+    msg = handleWebServer(webServer, msgSend.encode())
 
-        # Receive reply from web server
-        msg = b""
-        while True:
-            chunk = s.recv(1024)
-            if len(chunk) <= 0: 
-                break
-            msg += chunk
-        try:
-            print(f"[*<-] Received web server response: \n{msg.decode()}")
-        except:
-            print(f"[*<-] Received web server response: \n{msg.decode('latin1')}")
-        
-        # Send reply from web server to client
-        print(f"[<-*] Sending reply to client")
-        clientSock.send(msg)
-        
-        s.close()
-        
-    except socket.timeout:
-        print("Connection timed out. Unable to connect.")
-        s.close()
+    # Send reply to client
+    print(f"[<-*] Sending reply to client\r\n")
+    clientSock.send(msg)
+
+    return
+
+def handlePOST(message):
+    # Get web server from message
+    method = message.decode().split()[0]
+    path = message.decode().split()[1]
+    http_pos = path.find("://")
+    if (http_pos != -1):
+        path = path.partition("://")[2]
+    webServer, trash, file = path.partition("/")
+    file = "/" + file
+
+    # Create message to be sent to web server
+    requestLine = f"{method} {file} HTTP/1.1\r\n"
+    msgSend = requestLine 
+    msgSend += message.decode().partition("\r\n")[2].partition("Connection: ")[0]
+    msgSend += "Connection: close\r\n"
+    msgSend += message.decode().partition("Connection: ")[2].partition("\r\n")[2]
+
+    # Connect to web server and get reply
+    msg = handleWebServer(webServer, msgSend.encode())
+
+    # Send reply to client
+    print(f"[<-*] Sending reply to client\r\n")
+    clientSock.send(msg)
+
     return
 
 def handleClient(clientSock, addr):
@@ -58,15 +83,18 @@ def handleClient(clientSock, addr):
         if len(chunk) <= 0:
             break   
         message += chunk
-        print(f"[->*] Request from user: {addr}")
-        print(message.decode())
+        print(f"[->*] Request from user: {addr}\r\n")
+        try:
+            print(f"{message.decode()}\r\n")
+        except:
+            clientSock.close()
+            return
         
         # Extract the information from the given message
         requestLine = message.decode().split('\r\n')[0]
         method = message.decode().split()[0]
         path = message.decode().split()[1]
 
-        proxy = False
         # Handle the request by type
         if method == "GET":
             handleGET(message)
@@ -76,6 +104,7 @@ def handleClient(clientSock, addr):
             clientSock.close()
             return
         elif method == "POST":
+            handlePOST(message)
             clientSock.close()
             return
         else:
