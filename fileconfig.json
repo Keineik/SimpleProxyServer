@@ -1,0 +1,5 @@
+{
+    "cache_time": "900",
+    "whitelist" :[ "www.google.com", "www.example.com", "bing.com"],
+    "time": "7-21"
+}
