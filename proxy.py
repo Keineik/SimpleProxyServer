@@ -9,7 +9,9 @@ def handleGET(message):
     http_pos = path.find("://")
     if (http_pos != -1):
         path = path.partition("://")[2]
-    webServer, file = path.split("/")
+    print(path)
+    webServer, trash, file = path.partition("/")
+    file = "/" + file
 
     s = socket(AF_INET, SOCK_STREAM)
     s.settimeout(5)
@@ -18,8 +20,9 @@ def handleGET(message):
 
         # Create request to web server
         requestLine = f"GET /{file} HTTP/1.1\r\n"
-        hostLine = f"Host: {webServer}\r\n"
-        msgSend = requestLine + hostLine + "Connection: close\r\n\r\n"
+        msgSend = requestLine 
+        msgSend += message.decode().partition("\r\n")[2].partition("\r\n\r\n")[0]
+        msgSend += "\r\nConnection: close\r\n\r\n"
         # Send request to web server
         s.send(msgSend.encode())
         print(f"[*->] Sending request to web server: \n{msgSend}")
@@ -37,16 +40,14 @@ def handleGET(message):
             print(f"[*<-] Received web server response: \n{msg.decode('latin1')}")
         
         # Send reply from web server to client
-        print(f"[<-*] Sending reply to client \n{msg.decode()}")
+        print(f"[<-*] Sending reply to client")
         clientSock.send(msg)
         
         s.close()
-        clientSock.close()
+        
     except socket.timeout:
         print("Connection timed out. Unable to connect.")
         s.close()
-        clientSock.close()
-
     return
 
 def handleClient(clientSock, addr):
@@ -69,6 +70,8 @@ def handleClient(clientSock, addr):
         # Handle the request by type
         if method == "GET":
             handleGET(message)
+            clientSock.close()
+            return
         elif method == "HEAD":
             clientSock.close()
             return
@@ -79,8 +82,6 @@ def handleClient(clientSock, addr):
             # Response 403 Forbidden for unsupported methods
             clientSock.close()
             return
-    clientSock.close()
-    return
 
 
 if len(sys.argv) <= 1:
@@ -102,5 +103,6 @@ while True:
     clientSock, addr = serverSock.accept()
     print('Received a connection from:', addr)
     # Create a new thread and run
-    thread = threading.Thread(target=handleClient, args=(clientSock, addr))
-    thread.start()
+    #thread = threading.Thread(target=handleClient, args=(clientSock, addr))
+    #thread.start()
+    handleClient(clientSock, addr)
