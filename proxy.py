@@ -1,286 +1,167 @@
-import socket
-import sys
 import threading
-import time as pytime
-import configparser
-from datetime import datetime, time 
+from socket import *
 
-def read_config_file(filename):
-    config = configparser.ConfigParser()
-    config.read(filename)
+import sys
 
-    # Get values from the "default" section
-    cache_time = config.getint('default', 'cache_time')
-    whitelisting = config.get('default', 'whitelisting')
-    time = config.get('default', 'time')
-    timeout = int(config.get('default', 'timeout'))
-    enabling_whitelist = config.getboolean('default', 'enabling_whitelist')
-    time_restriction = config.getboolean('default', 'time_restriction')
-    max_recieve = config.getint('default', 'max_recieve')
+def replyClient(clientSock, reply):
+    # Send reply to client
+    clientSock.send(reply)
 
-    # Process the whitelisting string into a list
-    whitelist_items = [item.strip() for item in whitelisting.split(',')]
-    timelist=[timeline.strip() for timeline in time.split('-')]
-
-    return cache_time, whitelist_items, timelist, timeout, enabling_whitelist, time_restriction, max_recieve
-
-file_path = 'config.ini'
-cache_time, whitelist, allow_time,timeout, enabling_whitelist, time_restriction, max_recieve = read_config_file(file_path)
-
-def send_response(conn, status_code, content_type, response_data):
-    header = f"HTTP/1.1 {status_code}\r\n"
-    header += f"Content-Length: {len(response_data)}\r\n"
-    header += f"Content-Type: {content_type}\r\n\r\n"
-
-    response = header.encode() + response_data
-    conn.send(response)
-    return response.decode()
-
-def send_error_response(conn):
-    with open("error403.html", 'r') as f:
-        resdata = f.read()
-    ctype = "text/html"
-    send_response(conn, b"403 Forbidden", ctype, resdata.encode())
-
-cache = {}
-def is_cache_valid(url):
-    if url in cache:
-        current_time = pytime.time()
-        last_update_time = cache[url]["last_update_time"]
-        if current_time - last_update_time < cache_time:
-            return True
-    return False
-
-def is_in_allowing_time(t):
-    if not time_restriction:
-        return True
-    time1 = time(int(allow_time[0]),0,0)
-    time2 = time(int(allow_time[1]),0,0)
-    if time1 <= t <= time2:
-        return True
-    return False
-
-def is_in_whitelist(url):
-    for link in whitelist:
-        if url in link:
-            return True
-    return False
-
-def proxy(conn, proxy_url,data):
-    request = data.split(b'\r\n')[0]
-    req_method = request.split(b' ')[0]
-    http_pos = proxy_url.decode().find("://") # find pos of ://
-    if (http_pos==-1):
-        temp = proxy_url.decode()
-    else:
-        temp = proxy_url.decode()[(http_pos+3):] # get the rest of url
-    if not is_in_allowing_time(datetime.now().time()):
-        send_error_response(conn)
-        conn.close()
-        return
-    if is_cache_valid(temp):
-        print(f"[*] SENDING CACHED RESPONSE FOR: {temp}")
-        conn.send(cache[temp]["cache"])
-        conn.close()
-        return    
-    url=temp
-    port_pos = temp.find(":") # find the port pos (if any)
-    # find end of web server
-    webserver_pos = temp.find("/")
-    if webserver_pos == -1:
-        webserver_pos = len(temp)
-
-    webserver = ""
-    port = -1
-    if (port_pos==-1 or webserver_pos < port_pos): 
-
-        # default port 
-        port = 80 
-        webserver = temp[:webserver_pos] 
-        tail = temp[webserver_pos:]
-    else: # specific port 
-        port = int((temp[(port_pos+1):])[:webserver_pos-port_pos-1])
-        webserver = temp[:port_pos] 
-        tail = temp[webserver_pos:]
-    if enabling_whitelist:
-        if not is_in_whitelist(webserver):
-            send_error_response(conn)
-            conn.close()
-            return
-    sv = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
-    sv.settimeout(timeout)
+    # Process what to print
     try:
-        sv.connect((webserver, port))
-        firstline = f"{req_method.decode()} {tail} {request.split(b' ')[2].decode()}"
-        secondline = f"Host: {webserver}:{port}"
-        headers = data.split(b'\r\n\r\n')
-        temp = headers[0].split(b'\r\n')
-        temp[0] = firstline.encode()
-        temp[1] = secondline.encode()
-        temp = b'\r\n'.join(temp)+ b'\r\n'+ b'Connection: Close' + b"\r\n\r\n" +headers[1]
-        #proxy_res= firstline.encode() + temp.encode()
-        print(f"SENDING REQUEST TO WEB SERVER: \n{temp.decode()}")
-        sv.send(temp)
-        res=b""
-        while True:
-            # receive data from web server
-            temp=sv.recv(max_recieve)
-            res = res+temp
-            if (len(temp)<=0): break
-            try:
-                print(f"RECIVED WEB SERVER RESPONSE: \n{temp.decode()}")
-            except:
-                print(f"RECIVED WEB SERVER RESPONSE: \n{temp.decode('latin1')}")
-        conn.send(res) # send to browser/client   
-        cache[url]={
-            "cache": res,
-            "last_update_time": pytime.time() 
-        }
-        sv.close()
-        conn.close()
-    except socket.timeout:
-        send_error_response(conn)
-        print("Connection timed out. Unable to connect to the server.")
-        sv.close()
-        conn.close()
-
-def process_get_request(conn, req_url,data):
-    req_url1 = req_url.strip(b'/')
-    if req_url1 == b"":
-        url = 'index.html'
-        ctype = "text/html"
-    elif req_url1 == b"favicon.ico":
-        url = req_url1.decode()
-        ctype = "image/x-icon"
-    else:
-        url = req_url1.decode()
-        ctype = "application/x-www-form-urlencoded"
-
-    try:
-        with open(url, 'rb') as f:
-            resdata = f.read()
-    except IOError:
-        # Handle proxy 
-        proxy(conn, req_url,data)
-        return ctype, b'', True
-
-    return ctype, resdata, False
-
-def process_head_request(conn, req_url,data):
-    req_url1 = req_url.strip(b'/')
-    if req_url1 == b"":
-        url = 'index.html'
-        ctype = "text/html"
-    elif req_url1 == b"favicon.ico":
-        url = req_url1.decode()
-        ctype = "image/x-icon"
-    else:
-        url = req_url1.decode()
-        ctype = "application/x-www-form-urlencoded"
-
-    try:
-        with open(url, 'rb') as f:
-            resdata = f.read()
-    except IOError:
-        # Handle proxy 
-        proxy(conn, req_url,data)
-        return True
-    header = f"HTTP/1.1 200\r\n"
-    header += f"Content-Length: {len(resdata)}\r\n"
-    header += f"Content-Type: {ctype}\r\n\r\n"
-    conn.send(header.encode())
-    conn.close()
-    return True
-
-def process_post_request(conn, req_url, data):
-    
-    if req_url == b"submit":
-        # Handle form submission
+        header = reply.decode().partition("\r\n\r\n")[0]
+    except:
+        header = reply.decode('latin1').partition("\r\n\r\n")[0]
+    if header.find("Content-Type: ") != -1 and header.find("text") != -1:
         try:
-            post_data = data.split(b'\r\n\r\n')[1]
-            with open("post.txt", 'a') as f:
-                f.write('\n'+post_data.decode())
-            resdata = "success uploading".encode()
-            ctype = "text/plain"
-            temp=send_response(conn, "200", ctype, resdata)
-            print(f"RESPONSE: {temp}")
-            conn.close()
-        except IOError:
-            with open("error403.html", 'rb') as f:
-                resdata = f.read()
-            ctype = "text/html"
-            send_response(conn, "403 Forbidden", ctype, resdata)
-            conn.close()
-    elif req_url == b"upload":
-        # Handle file upload 
-        des1 = data.decode().find('File-Name:')
-        des2 = data.find(b'\r\n\r\n')
-        filename = data.decode()[des1 + 11:].split('\n')[0]
-        url = filename.strip('\n').strip('\r').strip('\r\n')
-        resdata = f'You have uploaded: {filename}'.encode()
-        ctype = "text/plain"  # Set a generic Content-Type since it's a text response
-        with open(url, 'wb') as f:  # Use 'wb' mode for writing binary data
-            f.write(data[des2 + 4:])
-        send_response(conn, b"403 Forbidden", ctype, resdata)
-        conn.close()
-    else:
-        try:
-            proxy(conn, req_url, data)
+            print(f"[<-*] Send reply to client: \n{reply.decode()}")
         except:
-            # Return a 403 Forbidden response for unknown POST requests
-            send_error_response(conn)
-            conn.close()
+            print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT TEXT, CAN'T SHOW OR FAILED TO DECODE")
+    else:
+        print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT TEXT, CAN'T SHOW")
 
-def process(conn, addr):
+    return
+
+def getInfoFromMessage(message):
+    # Get method, web server and file path from message
+    method = message.decode().split()[0]
+    path = message.decode().split()[1]
+    http_pos = path.find("://")
+    if (http_pos != -1):
+        path = path.partition("://")[2]
+    webServer, trash, file = path.partition("/")
+    file = "/" + file
+    return method, webServer, file
+
+def handleHEAD(message):
+    # Get method, web server and file path from message
+    method, webServer, file = getInfoFromMessage(message)
+
+    # Create HEAD message to be sent to web server
+    headerRequest = f"HEAD {file} HTTP/1.1\r\n"
+    headerRequest += f"Host: {webServer}\r\n\r\n"
+    headerRequest += f"Connection: close\r\n\r\n"
+
+    # Connect to web server and get reply
+    headSocket = socket(AF_INET, SOCK_STREAM)
+    headSocket.connect((webServer, 80))
+    headSocket.send(headerRequest.encode())
+    # Receive reply from web server
+    httpHeader = headSocket.recv(4096)
+
+    headSocket.close()
+    return httpHeader
+
+def handleGET(message):
+    # Get method, web server and file path from message
+    method, webServer, file = getInfoFromMessage(message)
+
+    # Create GET message to be sent to web server
+    getRequest = f"{method} {file} HTTP/1.1\r\n"
+    getRequest += f"Host: {webServer}\r\n"
+    getRequest += f"Connection: close\r\n\r\n"
+
+    # Connect to web server and get reply
+    getSocket = socket(AF_INET, SOCK_STREAM)
+    getSocket.connect((webServer, 80))
+    getSocket.send(getRequest.encode())
+    # Receive reply from web server
+    fragments = []
     while True:
-        data = conn.recv(max_recieve)
-        if not data:
-            return
+        chunk = getSocket.recv(1024)
+        if not chunk:
+            break
+        fragments.append(chunk)
+    data = b"".join(fragments)
 
-        print(data.decode())
+    getSocket.close()
+    return data
 
-        request = data.split(b'\r\n')[0]
-        req_method = request.split(b' ')[0]
-        req_url = request.split(b' ')[1]
-        #proxy_url = request.split(b' ')[1]
-        print(f"[*] Request from user: {addr}")
-        proxy = False
-        if req_method == b'GET':
-            ctype, resdata, proxy = process_get_request(conn, req_url,data)
-        elif req_method == b'HEAD':
-            proxy = process_head_request(conn, req_url,data)
-        elif req_method == b'POST':
-            process_post_request(conn, req_url.strip(b'/'), data)
+def handlePOST(message):
+    # Get method, web server and file path from message
+    method, webServer, file = getInfoFromMessage(message)
+
+    # Create POST message to be sent to web server
+    postRequest = f"{method} {file} HTTP/1.1\r\n"
+    if message.decode().find("Connection: ") != -1:
+        postRequest += message.decode().partition("\r\n")[2].partition("Connection: ")[0]
+        postRequest += "Connection: close\r\n"
+        postRequest += message.decode().partition("Connection: ")[2].partition("\r\n")[2]
+    else:
+        temp = message.decode().partition("\r\n\r\n")
+        postRequest += temp[0]
+        postRequest += "\r\nConnection: close\r\n\r\n"
+        postRequest += temp[2]
+
+    # Connect to web server and get reply
+    postSocket = socket(AF_INET, SOCK_STREAM)
+    postSocket.connect((webServer, 80))
+    postSocket.send(postRequest.encode())
+    # Receive reply from web server
+    fragments = []
+    while True:
+        chunk = postSocket.recv(1024)
+        if not chunk:
+            break
+        fragments.append(chunk)
+    data = b"".join(fragments)
+
+    postSocket.close()
+    return data
+
+def handleClient(clientSock, addr):
+    # Receive message from client
+    message = b""
+    while True:
+        message = clientSock.recv(4096)
+        if not message:
             return
+        try:
+            print(f"[->*] Request from user: {addr}\n{message.decode()}\r\n")
+        except:
+            clientSock.close()
+            return
+        
+        # Extract the method from the given message
+        method = message.decode().split()[0]
+
+        # Handle the request by type
+        if method == "GET":
+            reply = handleGET(message)
+        elif method == "HEAD":
+            reply = handleHEAD(message)
+        elif method == "POST":
+            reply = handlePOST(message)
         else:
-            # Return a 403 Forbidden response for unsupported methods
-            send_error_response(conn)
-            conn.close()
+            # Response 403 Forbidden for unsupported methods
+            clientSock.close()
             return
-        if proxy == False:    
-            resp = send_response(conn, "200", ctype, resdata)
-            print(f"Send back to client: {resp}")
-            conn.close()
+        
+        # Reply to client
+        replyClient(clientSock, reply)
+
+        clientSock.close()
         return
+    
 
-def main():
-    if len(sys.argv) != 3:
-        print("Usage: python server.py <HOST> <PORT>")
-        sys.exit(1)
+if len(sys.argv) != 2:
+    print('Usage : "python ProxyServer.py server_ip"\n[server_ip : It is the IP Address Of Proxy Server')
+    sys.exit(2)
+# Client test: curl --proxy "127.0.0.1:8888" "http://example.com" -v
+# Create a server socket, bind it to a port and start listening
+serverSock = socket(AF_INET, SOCK_STREAM)
+serverSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-    HOST = sys.argv[1]
-    PORT = int(sys.argv[2])
+HOST = sys.argv[1].split(':')[0]
+PORT = int(sys.argv[1].split(':')[1])
+serverSock.bind((HOST, PORT))
 
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((HOST, PORT))
-    print(f'Server running on {HOST}:{PORT}')
-
-    s.listen(5)
-    while True:
-        client, caddr = s.accept()
-        thread = threading.Thread(target=process, args=(client,caddr))
-        thread.start()
-
-if __name__ == "__main__":
-    main()
+serverSock.listen(5)
+print("Ready to serve: ")
+while True:
+    # Start receiving data from the client
+    clientSock, addr = serverSock.accept()
+    # Create a new thread and run
+    thread = threading.Thread(target=handleClient, args=(clientSock, addr))
+    thread.setDaemon(1)
+    thread.start()
