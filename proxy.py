@@ -3,6 +3,14 @@ from socket import *
 
 import sys
 
+def handleForbiddenAction(clientSock):
+    with open("error403.html", 'r') as file:
+        data = file.read()
+    reply = f"HTTP/1.1 403 Forbidden\r\n\r\n"
+    reply += data
+    
+    return reply.encode()
+
 def replyClient(clientSock, reply):
     # Send reply to client
     clientSock.send(reply)
@@ -133,9 +141,7 @@ def handleClient(clientSock, addr):
         elif method == "POST":
             reply = handlePOST(message)
         else:
-            # Response 403 Forbidden for unsupported methods
-            clientSock.close()
-            return
+            reply = handleForbiddenAction(message)
         
         # Reply to client
         replyClient(clientSock, reply)
