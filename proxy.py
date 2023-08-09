@@ -1,14 +1,27 @@
 import threading
 from socket import *
-
+import json
+from datetime import datetime
 import sys
 
-def handleForbiddenAction(clientSock):
+def getconfig():
+    fileConfig = open('config.json')
+    configs = json.load(fileConfig) 
+    return configs['cache_time'], configs['whitelisting_enabled'], configs['whitelist'], configs['time_restriction'], configs['time_range']
+cache_time, whitelisting_enabled, whitelist, time_restriction, time_range = getconfig()
+
+def isInTimeRange():
+    if time_restriction == 0:
+        return True
+    now = datetime.now().strftime("%H")
+    start, trash, end = time_range.partition('-')
+    return int(start) <= int(now) <= int(end)
+    
+
+def handleForbiddenAction():
     with open("error403.html", 'r') as file:
         data = file.read()
-    reply = f"HTTP/1.1 403 Forbidden\r\n\r\n"
-    reply += data
-    
+    reply = f"HTTP/1.1 403 Forbidden\r\n\r\n{data}"
     return reply.encode()
 
 def replyClient(clientSock, reply):
@@ -34,120 +47,77 @@ def getInfoFromMessage(message):
     # Get method, web server and file path from message
     method = message.decode().split()[0]
     path = message.decode().split()[1]
-    http_pos = path.find("://")
-    if (http_pos != -1):
+    if (path.find("://") != -1):
         path = path.partition("://")[2]
     webServer, trash, file = path.partition("/")
     file = "/" + file
     return method, webServer, file
 
-def handleHEAD(message):
+def handleHEAD_GET_POST(message):
     # Get method, web server and file path from message
     method, webServer, file = getInfoFromMessage(message)
 
-    # Create HEAD message to be sent to web server
-    headerRequest = f"HEAD {file} HTTP/1.1\r\n"
-    headerRequest += f"Host: {webServer}\r\n\r\n"
-    headerRequest += f"Connection: close\r\n\r\n"
-
-    # Connect to web server and get reply
-    headSocket = socket(AF_INET, SOCK_STREAM)
-    headSocket.connect((webServer, 80))
-    headSocket.send(headerRequest.encode())
-    # Receive reply from web server
-    httpHeader = headSocket.recv(4096)
-
-    headSocket.close()
-    return httpHeader
-
-def handleGET(message):
-    # Get method, web server and file path from message
-    method, webServer, file = getInfoFromMessage(message)
-
-    # Create GET message to be sent to web server
-    getRequest = f"{method} {file} HTTP/1.1\r\n"
-    getRequest += f"Host: {webServer}\r\n"
-    getRequest += f"Connection: close\r\n\r\n"
-
-    # Connect to web server and get reply
-    getSocket = socket(AF_INET, SOCK_STREAM)
-    getSocket.connect((webServer, 80))
-    getSocket.send(getRequest.encode())
-    # Receive reply from web server
-    fragments = []
-    while True:
-        chunk = getSocket.recv(1024)
-        if not chunk:
-            break
-        fragments.append(chunk)
-    data = b"".join(fragments)
-
-    getSocket.close()
-    return data
-
-def handlePOST(message):
-    # Get method, web server and file path from message
-    method, webServer, file = getInfoFromMessage(message)
-
-    # Create POST message to be sent to web server
-    postRequest = f"{method} {file} HTTP/1.1\r\n"
-    if message.decode().find("Connection: ") != -1:
-        postRequest += message.decode().partition("\r\n")[2].partition("Connection: ")[0]
-        postRequest += "Connection: close\r\n"
-        postRequest += message.decode().partition("Connection: ")[2].partition("\r\n")[2]
+    # Create request to be sent to web server
+    request = f"{method} {file} HTTP/1.1\r\n"
+    if method == "POST":
+        if message.decode().find("Connection: ") != -1:
+            request += message.decode().partition("\r\n")[2].partition("Connection: ")[0]
+            request += "Connection: close\r\n"
+            request += message.decode().partition("Connection: ")[2].partition("\r\n")[2]
+        else:
+            temp = message.decode().partition("\r\n\r\n")
+            request += temp[0]
+            request += "\r\nConnection: close\r\n\r\n"
+            request += temp[2]
     else:
-        temp = message.decode().partition("\r\n\r\n")
-        postRequest += temp[0]
-        postRequest += "\r\nConnection: close\r\n\r\n"
-        postRequest += temp[2]
+        request += f"Host: {webServer}\r\n\r\n"
+        request += f"Connection: close\r\n\r\n"
 
     # Connect to web server and get reply
-    postSocket = socket(AF_INET, SOCK_STREAM)
-    postSocket.connect((webServer, 80))
-    postSocket.send(postRequest.encode())
+    webServerSock = socket(AF_INET, SOCK_STREAM)
+    webServerSock.connect((webServer, 80))
+    webServerSock.send(request.encode())
     # Receive reply from web server
     fragments = []
     while True:
-        chunk = postSocket.recv(1024)
+        chunk = webServerSock.recv(1024)
         if not chunk:
             break
         fragments.append(chunk)
     data = b"".join(fragments)
 
-    postSocket.close()
+    webServerSock.close()
     return data
 
 def handleClient(clientSock, addr):
     # Receive message from client
-    message = b""
-    while True:
-        message = clientSock.recv(4096)
-        if not message:
-            return
-        try:
-            print(f"[->*] Request from user: {addr}\n{message.decode()}\r\n")
-        except:
-            clientSock.close()
-            return
-        
-        # Extract the method from the given message
-        method = message.decode().split()[0]
-
-        # Handle the request by type
-        if method == "GET":
-            reply = handleGET(message)
-        elif method == "HEAD":
-            reply = handleHEAD(message)
-        elif method == "POST":
-            reply = handlePOST(message)
-        else:
-            reply = handleForbiddenAction(message)
-        
-        # Reply to client
-        replyClient(clientSock, reply)
-
+    message = clientSock.recv(4096)
+    if not message:
+        return
+    try:
+        print(f"[->*] Request from user: {addr}\n{message.decode()}\r\n")
+    except:
         clientSock.close()
         return
+    
+    # Extract the method from the given message
+    method, webServer, file = getInfoFromMessage(message)
+
+    # Check whitelisting and time restriction
+    if isInTimeRange() == False:
+        reply = handleForbiddenAction()
+    elif whitelisting_enabled == 1 and webServer in whitelist:
+        reply = handleForbiddenAction()
+    # Handle the request by type
+    elif method in ["HEAD", "GET", "POST"]:
+        reply = handleHEAD_GET_POST(message)
+    else:
+        reply = handleForbiddenAction()
+    
+    # Reply to client
+    replyClient(clientSock, reply)
+    clientSock.close()
+    return
     
 
 if len(sys.argv) != 2:
@@ -162,12 +132,12 @@ HOST = sys.argv[1].split(':')[0]
 PORT = int(sys.argv[1].split(':')[1])
 serverSock.bind((HOST, PORT))
 
-serverSock.listen(5)
+serverSock.listen(10)
 print("Ready to serve: ")
 while True:
     # Start receiving data from the client
     clientSock, addr = serverSock.accept()
     # Create a new thread and run
     thread = threading.Thread(target=handleClient, args=(clientSock, addr))
-    thread.setDaemon(1)
+    #thread.setDaemon(1)
     thread.start()
