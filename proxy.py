@@ -7,16 +7,15 @@ import sys
 def getconfig():
     fileConfig = open('config.json')
     configs = json.load(fileConfig) 
-    return configs['cache_time'], configs['whitelisting_enabled'], configs['whitelist'], configs['time_restriction'], configs['time_range']
-cache_time, whitelisting_enabled, whitelist, time_restriction, time_range = getconfig()
+    return configs['cache_time'], configs['whitelisting_enabled'], configs['whitelist'], configs['time_restriction'], configs['time_range'], configs['decode_format']
+cache_time, whitelisting_enabled, whitelist, time_restriction, time_range, decode_format = getconfig()
 
 def isInTimeRange():
     if time_restriction == 0:
         return True
     now = datetime.now().strftime("%H")
     start, trash, end = time_range.partition('-')
-    return int(start) <= int(now) <= int(end)
-    
+    return int(start) <= int(now) < int(end)
 
 def handleForbiddenAction():
     with open("error403.html", 'r') as file:
@@ -29,29 +28,37 @@ def replyClient(clientSock, reply):
     clientSock.send(reply)
 
     # Process what to print
-    try:
-        header = reply.decode().partition("\r\n\r\n")[0]
-    except:
-        header = reply.decode('latin1').partition("\r\n\r\n")[0]
-    if header.find("Content-Type: ") != -1 and header.find("text") != -1:
+    header = reply.decode(decode_format).partition("\r\n\r\n")[0]
+    if header.find("text") != -1 and len(reply.decode(decode_format)) <= 1000:
         try:
-            print(f"[<-*] Send reply to client: \n{reply.decode()}")
+            print(f"[<-*] Send reply to client: \n{reply.decode(decode_format)}")
         except:
-            print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT TEXT, CAN'T SHOW OR FAILED TO DECODE")
+            print(f"[<-*] Send reply to client: \n{header}\r\n\r\nFAILED TO DECODE\r\n\r\n")
+    elif len(reply.decode(decode_format)) <= 1000:
+        print(f"[<-*] Send reply to client: \n{header}\r\n\r\nTEXT TOO LONG, WON'T SHOW\r\n\r\n")
     else:
-        print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT TEXT, CAN'T SHOW")
+        print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT A TEXT FILE, WON'T SHOW\r\n\r\n")
 
     return
 
 def getInfoFromMessage(message):
     # Get method, web server and file path from message
-    method = message.decode().split()[0]
-    path = message.decode().split()[1]
+    method = message.decode(decode_format).split()[0]
+    path = message.decode(decode_format).split()[1]
     if (path.find("://") != -1):
         path = path.partition("://")[2]
     webServer, trash, file = path.partition("/")
     file = "/" + file
     return method, webServer, file
+
+def getCachedImage(message):
+    header = message.decode(decode_format).partition("\r\n\r\n")[0]
+    if header.find("image") == -1:
+        return False, ""
+    return
+
+def saveImageToCache(message):
+    return
 
 def handleHEAD_GET_POST(message):
     # Get method, web server and file path from message
@@ -60,12 +67,12 @@ def handleHEAD_GET_POST(message):
     # Create request to be sent to web server
     request = f"{method} {file} HTTP/1.1\r\n"
     if method == "POST":
-        if message.decode().find("Connection: ") != -1:
-            request += message.decode().partition("\r\n")[2].partition("Connection: ")[0]
+        if message.decode(decode_format).find("Connection: ") != -1:
+            request += message.decode(decode_format).partition("\r\n")[2].partition("Connection: ")[0]
             request += "Connection: close\r\n"
-            request += message.decode().partition("Connection: ")[2].partition("\r\n")[2]
+            request += message.decode(decode_format).partition("Connection: ")[2].partition("\r\n")[2]
         else:
-            temp = message.decode().partition("\r\n\r\n")
+            temp = message.decode(decode_format).partition("\r\n\r\n")
             request += temp[0]
             request += "\r\nConnection: close\r\n\r\n"
             request += temp[2]
@@ -95,7 +102,7 @@ def handleClient(clientSock, addr):
     if not message:
         return
     try:
-        print(f"[->*] Request from user: {addr}\n{message.decode()}\r\n")
+        print(f"[->*] Request from user: {addr}\n{message.decode(decode_format)}\r\n")
     except:
         clientSock.close()
         return
