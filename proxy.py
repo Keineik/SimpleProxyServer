@@ -3,12 +3,13 @@ from socket import *
 import json
 from datetime import datetime
 import sys
+import os
 
 def getconfig():
     fileConfig = open('config.json')
     configs = json.load(fileConfig) 
-    return configs['cache_time'], configs['whitelisting_enabled'], configs['whitelist'], configs['time_restriction'], configs['time_range'], configs['decode_format']
-cache_time, whitelisting_enabled, whitelist, time_restriction, time_range, decode_format = getconfig()
+    return configs['cache_time'], configs['whitelisting_enabled'], configs['whitelist'], configs['time_restriction'], configs['time_range'], configs['decode_format'], configs['supported_img_types']
+cache_time, whitelisting_enabled, whitelist, time_restriction, time_range, decode_format, supported_img_types = getconfig()
 
 def isInTimeRange():
     if time_restriction == 0:
@@ -25,7 +26,7 @@ def handleForbiddenAction():
 
 def replyClient(clientSock, reply):
     # Send reply to client
-    clientSock.send(reply)
+    clientSock.sendall(reply)
 
     # Process what to print
     header = reply.decode(decode_format).partition("\r\n\r\n")[0]
@@ -52,15 +53,61 @@ def getInfoFromMessage(message):
     return method, webServer, file
 
 def getCachedImage(message):
-    header = message.decode(decode_format).partition("\r\n\r\n")[0]
-    if header.find("image") == -1:
-        return False, ""
-    return
+    method, webServer, file = getInfoFromMessage(message)
 
-def saveImageToCache(message):
+    # If does not request image or image type not supported
+    filenameExtension = file.split("/").pop().partition(".")[2]
+    if filenameExtension not in supported_img_types:
+        return False, ""
+
+    # Get the image and image header path
+    imgPath = f"{os.getcwd()}/cache/{webServer}{file}"
+    imgHeaderPath = imgPath[:imgPath.rfind(".")] + ".bin"
+
+    # If the image is cached
+    try:
+        with open(imgPath, "rb") as fb:
+            img = fb.read()
+        with open(imgHeaderPath, "rb") as fb:
+            imgHeader = fb.read()
+        reply = imgHeader + "\r\n\r\n" + img
+        return True, reply
+    except:
+        return False, ""
+
+def saveImageToCache(message, webReply):
+    method, webServer, file = getInfoFromMessage(message)
+
+    # If does not request image or image type not supported
+    filenameExtension = file.split("/").pop().partition(".")[2]
+    if filenameExtension not in supported_img_types:
+        return
+    
+    # Get the path of the image, header and the folder containing them
+    imgPath = f"{os.getcwd()}/cache/{webServer}{file}"
+    imgHeaderPath = imgPath[:imgPath.rfind(".")] + ".bin"
+    folderPath = imgPath[:imgPath.rfind("/")]
+
+    # If the folder does not exist, create that folder
+    if not os.path.exists(folderPath):
+        os.makedirs(folderPath)
+
+    # Save image and header to cache
+    imgHeader, trash, img = webReply.decode(decode_format).partition("\r\n\r\n")
+    with open(imgPath, "wb") as fb:
+        fb.write(img.encode(decode_format))
+    with open(imgHeaderPath, "wb") as fb:
+        fb.write(imgHeader.encode(decode_format))
+        
     return
 
 def handleHEAD_GET_POST(message):
+    # If is cached
+    status, cachedReply = getCachedImage(message)
+    if status == True:
+        print("\r\nGET FROM CACHE SUCCESSFULLY\r\n")
+        return cachedReply
+
     # Get method, web server and file path from message
     method, webServer, file = getInfoFromMessage(message)
 
@@ -92,6 +139,8 @@ def handleHEAD_GET_POST(message):
             break
         fragments.append(chunk)
     data = b"".join(fragments)
+
+    saveImageToCache(message, data)
 
     webServerSock.close()
     return data
