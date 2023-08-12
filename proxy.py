@@ -1,7 +1,8 @@
 import threading
 from socket import *
 import json
-from datetime import datetime
+import datetime
+from time import strptime
 import sys
 import os
 
@@ -14,7 +15,7 @@ cache_time, whitelisting_enabled, whitelist, time_restriction, time_range, decod
 def isInTimeRange():
     if time_restriction == 0:
         return True
-    now = datetime.now().strftime("%H")
+    now = datetime.datetime.now().strftime("%H")
     start, trash, end = time_range.partition('-')
     return int(start) <= int(now) < int(end)
 
@@ -28,17 +29,17 @@ def replyClient(clientSock, reply):
     # Send reply to client
     clientSock.sendall(reply)
 
-    # Process what to print
-    header = reply.decode(decode_format).partition("\r\n\r\n")[0]
-    if header.find("text") != -1 and len(reply.decode(decode_format)) <= 1000:
-        try:
-            print(f"[<-*] Send reply to client: \n{reply.decode(decode_format)}")
-        except:
-            print(f"[<-*] Send reply to client: \n{header}\r\n\r\nFAILED TO DECODE\r\n\r\n")
-    elif len(reply.decode(decode_format)) <= 1000:
-        print(f"[<-*] Send reply to client: \n{header}\r\n\r\nTEXT TOO LONG, WON'T SHOW\r\n\r\n")
-    else:
-        print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT A TEXT FILE, WON'T SHOW\r\n\r\n")
+    # # Process what to print
+    # header = reply.decode(decode_format).partition("\r\n\r\n")[0]
+    # if header.find("text") != -1 and len(reply.decode(decode_format)) <= 500:
+    #     try:
+    #         print(f"[<-*] Send reply to client: \n{reply.decode(decode_format)}")
+    #     except:
+    #         print(f"[<-*] Send reply to client: \n{header}\r\n\r\nFAILED TO DECODE\r\n\r\n")
+    # elif len(reply.decode(decode_format)) > 500:
+    #     print(f"[<-*] Send reply to client: \n{header}\r\n\r\nTEXT TOO LONG, WON'T SHOW\r\n\r\n")
+    # else:
+    #     print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT A TEXT FILE, WON'T SHOW\r\n\r\n")
 
     return
 
@@ -70,10 +71,18 @@ def getCachedImage(message):
             img = fb.read()
         with open(imgHeaderPath, "rb") as fb:
             imgHeader = fb.read()
-        reply = imgHeader + "\r\n\r\n" + img
-        return True, reply
     except:
         return False, ""
+
+    # Get current time and compare with img time + cache time
+    currentUTCtime = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    imgTimeStr = imgHeader.decode(decode_format).partition("Date: ")[2].partition(" GMT")[0].partition(", ")[2]
+    imgTime = datetime.datetime.strptime(imgTimeStr, "%d %b %Y %H:%M:%S")
+
+    if (imgTime + datetime.timedelta(seconds = int(cache_time)) <= currentUTCtime):
+        return False, ""
+    return True, imgHeader + b"\r\n\r\n" + img
+
 
 def saveImageToCache(message, webReply):
     method, webServer, file = getInfoFromMessage(message)
@@ -150,11 +159,11 @@ def handleClient(clientSock, addr):
     message = clientSock.recv(4096)
     if not message:
         return
-    try:
-        print(f"[->*] Request from user: {addr}\n{message.decode(decode_format)}\r\n")
-    except:
-        clientSock.close()
-        return
+    # try:
+    #     print(f"[->*] Request from user: {addr}\n{message.decode(decode_format)}\r\n")
+    # except:
+    #     clientSock.close()
+    #     return
     
     # Extract the method from the given message
     method, webServer, file = getInfoFromMessage(message)
