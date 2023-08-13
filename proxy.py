@@ -171,7 +171,7 @@ def handleClient(clientSock, addr):
     # Check whitelisting and time restriction
     if isInTimeRange() == False:
         reply = handleForbiddenAction()
-    elif whitelisting_enabled == 1 and webServer in whitelist:
+    elif whitelisting_enabled == 1 and webServer not in whitelist:
         reply = handleForbiddenAction()
     # Handle the request by type
     elif method in ["HEAD", "GET", "POST"]:
