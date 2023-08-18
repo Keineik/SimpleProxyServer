@@ -208,25 +208,28 @@ def handleClient(clientSock, addr):
     clientSock.close()
     return
     
+def main():
+    if len(sys.argv) != 2:
+        print('Usage : "python ProxyServer.py server_ip"\n[server_ip : It is the IP Address Of Proxy Server')
+        sys.exit(2)
+    # Client test: curl --proxy "127.0.0.1:8888" "http://example.com" -v
+    # Create a server socket, bind it to a port and start listening
+    serverSock = socket(AF_INET, SOCK_STREAM)
+    serverSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-if len(sys.argv) != 2:
-    print('Usage : "python ProxyServer.py server_ip"\n[server_ip : It is the IP Address Of Proxy Server')
-    sys.exit(2)
-# Client test: curl --proxy "127.0.0.1:8888" "http://example.com" -v
-# Create a server socket, bind it to a port and start listening
-serverSock = socket(AF_INET, SOCK_STREAM)
-serverSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    HOST = sys.argv[1].split(':')[0]
+    PORT = int(sys.argv[1].split(':')[1])
+    serverSock.bind((HOST, PORT))
 
-HOST = sys.argv[1].split(':')[0]
-PORT = int(sys.argv[1].split(':')[1])
-serverSock.bind((HOST, PORT))
+    serverSock.listen(10)
+    print("Ready to serve: ")
+    while True:
+        # Start receiving data from the client
+        clientSock, addr = serverSock.accept()
+        # Create a new thread and run
+        thread = threading.Thread(target=handleClient, args=(clientSock, addr))
+        thread.setDaemon(1)
+        thread.start()
 
-serverSock.listen(10)
-print("Ready to serve: ")
-while True:
-    # Start receiving data from the client
-    clientSock, addr = serverSock.accept()
-    # Create a new thread and run
-    thread = threading.Thread(target=handleClient, args=(clientSock, addr))
-    thread.setDaemon(1)
-    thread.start()
+if __name__ == "__main__":
+    main()
