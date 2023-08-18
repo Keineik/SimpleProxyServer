@@ -29,17 +29,17 @@ def replyClient(clientSock, reply):
     # Send reply to client
     clientSock.sendall(reply)
 
-    # Process what to print
-    header = reply.decode(decode_format).partition("\r\n\r\n")[0]
-    if header.find("text") != -1 and len(reply.decode(decode_format)) <= 500:
-        try:
-            print(f"[<-*] Send reply to client: \n{reply.decode(decode_format)}")
-        except:
-            print(f"[<-*] Send reply to client: \n{header}\r\n\r\nFAILED TO DECODE\r\n\r\n")
-    elif len(reply.decode(decode_format)) > 500:
-        print(f"[<-*] Send reply to client: \n{header}\r\n\r\nTEXT TOO LONG, WON'T SHOW\r\n\r\n")
-    else:
-        print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT A TEXT FILE, WON'T SHOW\r\n\r\n")
+    # Process what to print to decode
+    # header = reply.decode(decode_format).partition("\r\n\r\n")[0]
+    # if header.find("text") != -1 and len(reply.decode(decode_format)) <= 500:
+    #     try:
+    #         print(f"[<-*] Send reply to client: \n{reply.decode(decode_format)}")
+    #     except:
+    #         print(f"[<-*] Send reply to client: \n{header}\r\n\r\nFAILED TO DECODE\r\n\r\n")
+    # elif len(reply.decode(decode_format)) > 500:
+    #     print(f"[<-*] Send reply to client: \n{header}\r\n\r\nTEXT TOO LONG, WON'T SHOW\r\n\r\n")
+    # else:
+    #     print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT A TEXT FILE, WON'T SHOW\r\n\r\n")
 
     return
 
@@ -149,6 +149,30 @@ def handleHEAD_GET_POST(message):
         fragments.append(chunk)
     data = b"".join(fragments)
 
+    # Handle Transfer-Encoding: chunked
+    dataHeader = data.partition(b"\r\n\r\n")[0]
+    if (dataHeader.find(b"chunked") != -1):
+        contentLength = "0"
+        newData = b""
+        chunks = data.partition(b"\r\n\r\n")[2].split(b"\r\n")
+        for i in range(len(chunks)):
+            if (chunks[i] == b"0"):
+                break
+            if (i % 2 == 0):
+                contentLength = str(int(contentLength) + int(chunks[i], base=16))
+            else:
+                newData += chunks[i]
+        newHeader = data.partition(b"\r\n\r\n")[0]
+        # If Transfer-Encoding only contains chunked
+        newHeader = newHeader.replace(b"Transfer-Encoding: chunked", b"Content-Length: " + contentLength.encode())
+        # If Transfer-Encoding contains other value such as gzip, deflate
+        if (newHeader.find(b"chunked") != -1):
+            newHeader = newHeader.replace(b", chunked", b"")
+            newHeader = newHeader.replace(b" chunked,", b"")
+            newHeader += "Content-Length: " + contentLength.encode()
+        data = newHeader + b"\r\n\r\n" + newData
+
+    # Check if is image and if it is, save to cache
     saveImageToCache(message, data)
 
     webServerSock.close()
@@ -204,5 +228,5 @@ while True:
     clientSock, addr = serverSock.accept()
     # Create a new thread and run
     thread = threading.Thread(target=handleClient, args=(clientSock, addr))
-    #thread.setDaemon(1)
+    thread.setDaemon(1)
     thread.start()

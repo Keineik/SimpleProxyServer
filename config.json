@@ -1,13 +1,14 @@
 {
     "cache_time": 900,
     "whitelisting_enabled": 0,
-    "whitelist" :["google.com", "example.com", "bing.com"],
+    "whitelist" :["google.com", "example.com", "oosc.online"],
     "time_restriction": 0,
     "time_range": "7-18",
     "decode_format": "ISO-8859-1",
     "supported_img_types": [
         "apng", "avif", "gif", 
-        "jpg", "jpeg", "jfif", "pjpeg", "pjp", "png", "svg", "webp", 
-        "bmp", "ico", "cur", "tif", "tiff"
+        "jpg", "jpeg", "jpe","jif", "jfif", "jfi", "pjpeg", "pjp", "png", "svg", "webp", 
+        "bmp", "ico", "cur", "tif", "tiff", 
+        "psd", "heif", "heic", "ind", "indd", "indt"
     ]
 }
