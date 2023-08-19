@@ -169,7 +169,7 @@ def handleHEAD_GET_POST(message):
         if (newHeader.find(b"chunked") != -1):
             newHeader = newHeader.replace(b", chunked", b"")
             newHeader = newHeader.replace(b" chunked,", b"")
-            newHeader += "Content-Length: " + contentLength.encode()
+            newHeader += b"Content-Length: " + contentLength.encode()
         data = newHeader + b"\r\n\r\n" + newData
 
     # Check if is image and if it is, save to cache
