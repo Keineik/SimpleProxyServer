@@ -25,24 +25,6 @@ def handleForbiddenAction():
     reply = f"HTTP/1.1 403 Forbidden\r\n\r\n{data}"
     return reply.encode()
 
-def replyClient(clientSock, reply):
-    # Send reply to client
-    clientSock.sendall(reply)
-
-    # Process what to print to decode
-    # header = reply.decode(decode_format).partition("\r\n\r\n")[0]
-    # if header.find("text") != -1 and len(reply.decode(decode_format)) <= 500:
-    #     try:
-    #         print(f"[<-*] Send reply to client: \n{reply.decode(decode_format)}")
-    #     except:
-    #         print(f"[<-*] Send reply to client: \n{header}\r\n\r\nFAILED TO DECODE\r\n\r\n")
-    # elif len(reply.decode(decode_format)) > 500:
-    #     print(f"[<-*] Send reply to client: \n{header}\r\n\r\nTEXT TOO LONG, WON'T SHOW\r\n\r\n")
-    # else:
-    #     print(f"[<-*] Send reply to client: \n{header}\r\n\r\nNOT A TEXT FILE, WON'T SHOW\r\n\r\n")
-
-    return
-
 def getInfoFromMessage(message):
     # Get method, web server and file path from message
     method = message.decode(decode_format).split()[0]
@@ -99,7 +81,10 @@ def saveImageToCache(message, webReply):
 
     # If the folder does not exist, create that folder
     if not os.path.exists(folderPath):
-        os.makedirs(folderPath)
+        try:
+            os.makedirs(folderPath)
+        except:
+            pass
 
     # Save image and header to cache
     imgHeader, trash, img = webReply.decode(decode_format).partition("\r\n\r\n")
@@ -107,7 +92,8 @@ def saveImageToCache(message, webReply):
         fb.write(img.encode(decode_format))
     with open(imgHeaderPath, "wb") as fb:
         fb.write(imgHeader.encode(decode_format))
-        
+    
+    print("SUCCESSFULLY SAVED IMAGE TO CACHE")
     return
 
 def handleHEAD_GET_POST(message):
@@ -121,25 +107,19 @@ def handleHEAD_GET_POST(message):
     method, webServer, file = getInfoFromMessage(message)
 
     # Create request to be sent to web server
-    request = f"{method} {file} HTTP/1.1\r\n"
-    if method == "POST":
-        if message.decode(decode_format).find("Connection: ") != -1:
-            request += message.decode(decode_format).partition("\r\n")[2].partition("Connection: ")[0]
-            request += "Connection: close\r\n"
-            request += message.decode(decode_format).partition("Connection: ")[2].partition("\r\n")[2]
-        else:
-            temp = message.decode(decode_format).partition("\r\n\r\n")
-            request += temp[0]
-            request += "\r\nConnection: close\r\n\r\n"
-            request += temp[2]
+    if message.partition(b"\r\n\r\n")[0].find(b"Connection: ") != -1:
+        request = message.partition(b"Connection: ")[0]
+        request += b"Connection: close\r\n"
+        request += message.partition(b"Connection: ")[2].partition(b"\r\n")[2]
     else:
-        request += f"Host: {webServer}\r\n\r\n"
-        request += f"Connection: close\r\n\r\n"
+        request = message.partition(b"\r\n\r\n")[0]
+        request += b"Connection: close\r\n"
+        request += message.partition(b"\r\n\r\n")[2]
 
     # Connect to web server and get reply
     webServerSock = socket(AF_INET, SOCK_STREAM)
     webServerSock.connect((webServer, 80))
-    webServerSock.send(request.encode())
+    webServerSock.send(request)
     # Receive reply from web server
     fragments = []
     while True:
@@ -154,14 +134,18 @@ def handleHEAD_GET_POST(message):
     if (dataHeader.find(b"chunked") != -1):
         contentLength = "0"
         newData = b""
-        chunks = data.partition(b"\r\n\r\n")[2].split(b"\r\n")
-        for i in range(len(chunks)):
-            if (chunks[i] == b"0"):
+        noHeader = data.partition(b"\r\n\r\n")[2]
+
+        while True:
+            chunkSize = int(noHeader.partition(b"\r\n")[0], base=16)
+            if chunkSize == 0:
                 break
-            if (i % 2 == 0):
-                contentLength = str(int(contentLength) + int(chunks[i], base=16))
-            else:
-                newData += chunks[i]
+            contentLength = str(int(contentLength) + chunkSize)
+
+            noHeader = noHeader.partition(b"\r\n")[2]
+            newData += noHeader[:chunkSize]
+            noHeader = noHeader[chunkSize:].partition(b"\r\n")[2]
+
         newHeader = data.partition(b"\r\n\r\n")[0]
         # If Transfer-Encoding only contains chunked
         newHeader = newHeader.replace(b"Transfer-Encoding: chunked", b"Content-Length: " + contentLength.encode())
@@ -169,9 +153,9 @@ def handleHEAD_GET_POST(message):
         if (newHeader.find(b"chunked") != -1):
             newHeader = newHeader.replace(b", chunked", b"")
             newHeader = newHeader.replace(b" chunked,", b"")
-            newHeader += b"Content-Length: " + contentLength.encode()
+            newHeader += b"Content-Length: " + contentLength.encode(decode_format)
         data = newHeader + b"\r\n\r\n" + newData
-
+    
     # Check if is image and if it is, save to cache
     saveImageToCache(message, data)
 
@@ -182,12 +166,13 @@ def handleClient(clientSock, addr):
     # Receive message from client
     message = clientSock.recv(4096)
     if not message:
-        return
-    try:
-        print(f"[->*] Request from user: {addr}\n{message.decode(decode_format)}\r\n")
-    except:
         clientSock.close()
         return
+    # try:
+    #     print(f"[->*] Request from user: {addr}\n{message.decode(decode_format)}\r\n")
+    # except:
+    #     clientSock.close()
+    #     return
     
     # Extract the method from the given message
     method, webServer, file = getInfoFromMessage(message)
@@ -204,13 +189,13 @@ def handleClient(clientSock, addr):
         reply = handleForbiddenAction()
     
     # Reply to client
-    replyClient(clientSock, reply)
+    clientSock.sendall(reply)
     clientSock.close()
     return
     
 def main():
     if len(sys.argv) != 2:
-        print('Usage : "python ProxyServer.py server_ip"\n[server_ip : It is the IP Address Of Proxy Server')
+        print('Usage : "python proxy.py server_ip"\n[server_ip : It is the IP Address Of Proxy Server')
         sys.exit(2)
     # Client test: curl --proxy "127.0.0.1:8888" "http://example.com" -v
     # Create a server socket, bind it to a port and start listening
@@ -228,7 +213,7 @@ def main():
         clientSock, addr = serverSock.accept()
         # Create a new thread and run
         thread = threading.Thread(target=handleClient, args=(clientSock, addr))
-        thread.setDaemon(1)
+        thread.daemon = True
         thread.start()
 
 if __name__ == "__main__":
