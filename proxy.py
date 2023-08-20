@@ -107,15 +107,15 @@ def handleHEAD_GET_POST(message):
     method, webServer, file = getInfoFromMessage(message)
 
     # Create request to be sent to web server
-    if message.partition(b"\r\n\r\n")[0].find(b"Connection: ") != -1:
+    if message.partition(b"\r\n\r\n")[0].find(b"\r\nConnection: ") != -1:
         request = message.partition(b"Connection: ")[0]
         request += b"Connection: close\r\n"
         request += message.partition(b"Connection: ")[2].partition(b"\r\n")[2]
     else:
         request = message.partition(b"\r\n\r\n")[0]
-        request += b"Connection: close\r\n"
+        request += b"\r\nConnection: close\r\n\r\n"
         request += message.partition(b"\r\n\r\n")[2]
-
+    
     # Connect to web server and get reply
     webServerSock = socket(AF_INET, SOCK_STREAM)
     webServerSock.connect((webServer, 80))
@@ -158,7 +158,6 @@ def handleHEAD_GET_POST(message):
     
     # Check if is image and if it is, save to cache
     saveImageToCache(message, data)
-
     webServerSock.close()
     return data
 
@@ -168,17 +167,14 @@ def handleClient(clientSock, addr):
     if not message:
         clientSock.close()
         return
-    # try:
-    #     print(f"[->*] Request from user: {addr}\n{message.decode(decode_format)}\r\n")
-    # except:
-    #     clientSock.close()
-    #     return
     
+    print(f"[->*] Request from user: {addr}\n{message.decode(decode_format)}\r\n")
+
     # Extract the method from the given message
     method, webServer, file = getInfoFromMessage(message)
 
     # Check whitelisting and time restriction
-    if isInTimeRange() == False:
+    if time_restriction == 1 and isInTimeRange() == False:
         reply = handleForbiddenAction()
     elif whitelisting_enabled == 1 and webServer not in whitelist:
         reply = handleForbiddenAction()
@@ -189,6 +185,7 @@ def handleClient(clientSock, addr):
         reply = handleForbiddenAction()
     
     # Reply to client
+    print(f"[<-*] Reply to client: {addr}\n{reply.decode(decode_format)}\r\n")
     clientSock.sendall(reply)
     clientSock.close()
     return
